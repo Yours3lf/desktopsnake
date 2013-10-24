@@ -209,7 +209,16 @@ coord& snakehead_pos = dummy; //u so stupid hoe
 direction dir = RIGHT;
 direction last_dir = RIGHT;
 
+bool inv_dir = false;
+unsigned food_counter = 0;
 float gamespeed = 4;
+float initial_gamespeed = gamespeed;
+float inc_amount = 16;
+
+//settings
+bool die_on_wall = true,
+     snake_gets_faster = true,
+     inverse_movement = true;
 
 void register_hotkeys()
 {
@@ -233,6 +242,15 @@ coord to_screenpos( coord snakemappos )
 {
   return coord( snakemappos.x * icon_extents.x + grid_correction.x, snakemappos.y * icon_extents.y + grid_correction.y );
 }
+
+//ideas
+//-inverse controls --- done
+//-no passing through walls --- done
+//-display score
+//-display record break event
+//-display inverse gameplay
+//-game features question?
+//-logo in at startup
 
 void place_food()
 {
@@ -264,18 +282,38 @@ void step_game()
   else if( dir == RIGHT )
     ++snakehead_pos.x;
 
+  bool wall = false;
+
   //check if snake is offscreen
   if( snakehead_pos.x < 0 )
+  {
     snakehead_pos.x = map_width - 1;
+    wall = true;
+  }
   
   if( snakehead_pos.y < 0 )
+  {
     snakehead_pos.y = map_height - 1;
+    wall = true;
+  }
 
   if( snakehead_pos.x >= map_width )
+  {
     snakehead_pos.x = 0;
+    wall = true;
+  }
 
   if( snakehead_pos.y >= map_height )
+  {
     snakehead_pos.y = 0;
+    wall = true;
+  }
+
+  if( die_on_wall && wall )
+  {
+    gameover = true;
+    return;
+  }
 
   //game logic
   blocktype nextblock = snakemap[snakehead_pos.x][snakehead_pos.y];
@@ -285,6 +323,18 @@ void step_game()
     //dont remove last snake block
     place_food();
     set_icon_position( food_idx, to_screenpos( food_pos ) );
+    
+    if( snake_gets_faster )
+    {
+      gamespeed += inc_amount * 0.01;
+    }
+
+    ++food_counter;
+
+    if( food_counter % 10 == 0 )
+    {
+      inv_dir = !inv_dir;
+    }
   }
   else if( nextblock == SNAKE ) 
   {
@@ -316,6 +366,11 @@ void init_game()
     c.assign( map_height, EMPTY );
   }
 
+  gamespeed = initial_gamespeed;
+  food_counter = 0;
+  inv_dir = false;
+  dir = RIGHT;
+
   //move all icons off-sceen
   int cntr = 0;
   for( auto c : icon_pos )
@@ -346,6 +401,34 @@ struct score
   
   score( string n = string(), unsigned s = unsigned() ) : name( n ), num( s ) {}
 };
+
+void write_settings()
+{
+  ofstream of( "settings.dat" );
+
+  if( !of.is_open() )
+    return;
+
+  of.write( (char*)&die_on_wall, sizeof(die_on_wall) );
+  of.write( (char*)&inverse_movement, sizeof(inverse_movement) );
+  of.write( (char*)&snake_gets_faster, sizeof(snake_gets_faster) );
+
+  of.close();
+}
+
+void read_settings()
+{
+  ifstream f( "settings.dat" );
+
+  if( !f.is_open() )
+    return;
+
+  f.read( (char*)&die_on_wall, sizeof(die_on_wall) );
+  f.read( (char*)&inverse_movement, sizeof(inverse_movement) );
+  f.read( (char*)&snake_gets_faster, sizeof(snake_gets_faster) );
+
+  f.close();
+}
 
 void display_highscores()
 {
@@ -379,10 +462,33 @@ void display_highscores()
 
   int counter = 1;
   for( auto c : scores )
-    if( !c.name.empty() )
+    if( !c.name.empty() && counter < 11 )
       cout << "#" << counter++ << " name: " << c.name << " score: " << c.num << endl;
 
   cout << endl;
+}
+
+bool ask_question()
+{
+  while( true )
+  {
+    char ret;
+    cin >> ret;
+
+    if( ret == 'n' )
+    {
+      Sleep(250);
+      return false;
+    }
+    else if( ret == 'y' )
+    {
+      Sleep(250);
+      cin.clear();
+      return true;
+    }
+    else
+      cout << "Come on, y or n?" << endl;
+  }
 }
 
 int main( int argc, char** args )
@@ -390,10 +496,31 @@ int main( int argc, char** args )
   cout << "Desktop Snake Game" << endl
        << "Move with arrows" << endl
        << "Exit with escape" << endl
-       << "Created by Marton Tamas in 2013" << endl
-       << endl;
+       << "Created by Marton Tamas in 2013" << endl;
 
   display_highscores();
+
+  read_settings();
+
+  cout << "Die when collide with wall? " << (die_on_wall ? "yes" : "no") << endl;
+  cout << "Snake gets faster when eating food? " << (snake_gets_faster ? "yes" : "no") << endl;
+  cout << "Inverse movement after eating 10 food? " << (inverse_movement ? "yes" : "no") << endl;
+  cout << endl << "Set gameplay options?" << endl;
+  bool set_gameplay_options = ask_question();
+       
+  if( set_gameplay_options )
+  {
+    cout << "Die when collide with wall?" << endl;
+    die_on_wall = ask_question();
+
+    cout << "Snake gets faster when eating food?" << endl;
+    snake_gets_faster = ask_question();
+
+    cout << "Inverse movement after eating 10 food?" << endl;
+    inverse_movement = ask_question();
+
+    write_settings();
+  }
 
   cout << "Press enter to start playing." << endl;
   cin.get();
@@ -467,6 +594,18 @@ int main( int argc, char** args )
     {
       if( msg.message == WM_HOTKEY )
       {
+        if( inverse_movement && inv_dir )
+        {
+          if( msg.wParam == LEFT )
+            msg.wParam = RIGHT;
+          else if( msg.wParam == RIGHT )
+            msg.wParam = LEFT;
+          else if( msg.wParam == UP )
+            msg.wParam = DOWN;
+          else if( msg.wParam == DOWN )
+            msg.wParam = UP;
+        }
+
         if( msg.wParam == LEFT && last_dir != RIGHT )
           dir = LEFT;
         else if( msg.wParam == RIGHT && last_dir != LEFT )
@@ -499,27 +638,12 @@ int main( int argc, char** args )
 
         display_highscores();
 
-        bool got_proper_answer = false;
-
         cout << "GAMEOVER. Wanna play some more? y/n" << endl;
 
-        while( !got_proper_answer )
+        if( ask_question() )
         {
-          char ret;
-          cin >> ret;
-
-          if( ret == 'n' )
-          {
-            got_proper_answer = true;
-          }
-          else if( ret == 'y' )
-          {
-            gameover = false;
-            got_proper_answer = true;
-            init_game();
-          }
-          else
-            cout << "Come on, y or n?" << endl;
+          gameover = false;
+          init_game();
         }
 
         //exit the game if still gameover
