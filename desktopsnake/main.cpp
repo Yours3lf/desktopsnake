@@ -557,6 +557,8 @@ int main( int argc, char** args )
   map_width = w;
   map_height = h;
 
+  cout << "Map size: " << map_width << " " << map_height << endl;
+
   //insert remaining desktop icons (if desktop is not full of icons)
   for( int c = icon_pos.size(); c <= block_count; ++c )
   {
