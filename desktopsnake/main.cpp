@@ -1,34 +1,4 @@
-#include <iostream>
-#include <vector>
-#include <list>
-#include <fstream>
-#include <sstream>
-#include <algorithm>
-#include <time.h>
-
-using namespace std;
-
-#define WIN32_LEAN_AND_MEAN //exclude useless garbage
-#include <Windows.h>
-#include <CommCtrl.h>
-#include <Shlobj.h>
-
-union LOHIWORD
-{
-  struct
-  {
-    WORD loword, hiword;
-  };
-
-  DWORD wholeword;
-};
-
-struct coord
-{
-  int x, y;
-
-  coord( int xx = int(), int yy = int() ) : x( xx ), y( yy ) {}
-};
+#include "desktop_handling.h"
 
 //desktop icons listview handle
 HWND win_handle = 0;
@@ -45,138 +15,6 @@ bool has_snaptogrid;
 string desktop_path;
 
 const coord grid_correction( 17, 2 );
-
-HWND get_desktop_listview_handle()
-{
-  //get listview of desktop icons
-  HWND handle = FindWindowA( "Progman", "Program Manager" );
-  handle = FindWindowExA( handle, 0, "SHELLDLL_DefView", 0 );
-  handle = FindWindowExA( handle, 0, "SysListView32", "FolderView" );
-  return handle;
-}
-
-void get_original_icon_locations( vector<coord>& container )
-{
-  LRESULT num_icons = 0;
-  DWORD process_id = 0;
-  HANDLE proc_handle = 0;
-  HANDLE proc_memory = 0;
-
-  //get total count of the icons on the desktop
-  num_icons = SendMessageA( win_handle, LVM_GETITEMCOUNT, 0, 0 );
-
-  //get desktop icon thread id
-  process_id = 0;
-  GetWindowThreadProcessId( win_handle, &process_id );
-
-  //get desktop process handle
-  proc_handle = OpenProcess( PROCESS_VM_OPERATION | PROCESS_VM_READ | PROCESS_VM_WRITE, false, process_id );
-  //allocate memory to be able to manipulate the desktop
-  proc_memory = VirtualAllocEx( proc_handle, 0, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE );
-
-  SIZE_T num_bytes_read = 0;
-
-  for( LRESULT c = 0; c < num_icons; ++c )
-  {
-    //get icon location
-    POINT point;
-    SendMessageA( win_handle, LVM_GETITEMPOSITION, c, (LPARAM)proc_memory );
-    ReadProcessMemory( proc_handle, proc_memory, &point, sizeof(POINT), &num_bytes_read );
-
-    container.push_back( coord( point.x, point.y ) );
-  }
-
-  //free process memory
-  VirtualFreeEx( proc_handle, proc_memory, 0, MEM_RELEASE );
-  CloseHandle( proc_handle );
-}
-
-void set_icon_position( int idx, coord pos )
-{
-  LOHIWORD tmp;
-  tmp.loword = pos.x;
-  tmp.hiword = pos.y;
-  SendMessageA( win_handle, LVM_SETITEMPOSITION, idx, tmp.wholeword );
-}
-
-void get_icon_extents( coord& c )
-{
-  //get spacing (icon w/h)
-  LRESULT spacing = SendMessageA( win_handle, LVM_GETITEMSPACING, FALSE, 0 );
-  c.x = LOWORD(spacing);
-  c.y = HIWORD(spacing);
-}
-
-void get_screen_size( coord& c )
-{
-  HWND tmp = GetDesktopWindow();
-  RECT rect;
-  GetWindowRect( tmp, &rect );
-  c.x = rect.right;
-  c.y = rect.bottom;
-}
-
-void set_snap_to_grid( bool tf )
-{
-  //set snap-to-grid
-  SendMessageA( win_handle, LVM_SETEXTENDEDLISTVIEWSTYLE, LVS_EX_SNAPTOGRID, tf ? ~0 : 0 );
-}
-
-bool get_snap_to_grid()
-{
-  return SendMessageA( win_handle, LVM_GETEXTENDEDLISTVIEWSTYLE, 0, 0 ) & LVS_EX_SNAPTOGRID;
-}
-
-void set_console_visibility( bool sh )
-{
-  ShowWindow( GetConsoleWindow(), sh ? SW_RESTORE : SW_MINIMIZE );
-}
-
-string get_desktop_path()
-{
-  char path[MAX_PATH];
-  SHGetSpecialFolderPathA(0, path, CSIDL_DESKTOP, false);
-  return string((char*)path);
-}
-
-//magic numbers
-#define MIN_ALL        419
-#define MIN_ALL_UNDO   416
-
-void set_windows_visibility( bool vis )
-{
-  HWND lHwnd = FindWindowA( "Shell_TrayWnd", NULL );
-  SendMessage( lHwnd, WM_COMMAND, vis ? MIN_ALL_UNDO : MIN_ALL, 0 );
-  Sleep(2000);
-}
-
-class timer
-{
-  FILETIME time;
-public:
-  void reset()
-  {
-    GetSystemTimeAsFileTime( &time );
-  }
-
-  //return the elapsed time in milliseconds
-  unsigned get_elapsed_time()
-  {
-    timer tmr;
-
-    ULONGLONG t;
-    t = ((ULONGLONG)time.dwHighDateTime << 32) | (ULONGLONG)time.dwLowDateTime;
-    t /= 10000;
-
-    ULONGLONG t2;
-    t2 = ((ULONGLONG)tmr.time.dwHighDateTime << 32) | (ULONGLONG)tmr.time.dwLowDateTime;
-    t2 /= 10000;
-
-    return t2 - t;
-  }
-
-  timer(){ reset(); }
-};
 
 //-----------------------------------------------
 //gamecode
@@ -208,6 +46,8 @@ coord& snakehead_pos = dummy; //u so stupid hoe
 
 direction dir = RIGHT;
 direction last_dir = RIGHT;
+
+bool run = true;
 
 bool inv_dir = false;
 unsigned food_counter = 0;
@@ -249,7 +89,7 @@ coord to_screenpos( coord snakemappos )
 //-display score
 //-display record break event
 //-display inverse gameplay
-//-game features question?
+//-game features question? --- done
 //-logo in at startup
 
 void place_food()
@@ -322,7 +162,7 @@ void step_game()
   {
     //dont remove last snake block
     place_food();
-    set_icon_position( food_idx, to_screenpos( food_pos ) );
+    set_icon_position( win_handle, food_idx, to_screenpos( food_pos ) );
     
     if( snake_gets_faster )
     {
@@ -355,7 +195,7 @@ void step_game()
 
   int cntr = 0;
   for( auto c : snake )
-    set_icon_position( cntr++, to_screenpos( c )  );
+    set_icon_position( win_handle, cntr++, to_screenpos( c )  );
 }
 
 void init_game()
@@ -374,7 +214,7 @@ void init_game()
   //move all icons off-sceen
   int cntr = 0;
   for( auto c : icon_pos )
-    set_icon_position( cntr++, coord( -100, 0 ) );
+    set_icon_position( win_handle, cntr++, coord( -100, 0 ) );
 
   set_console_visibility( false );
 
@@ -386,7 +226,7 @@ void init_game()
 
   //set up food
   place_food();
-  set_icon_position( food_idx, to_screenpos( food_pos ) );
+  set_icon_position( win_handle, food_idx, to_screenpos( food_pos ) );
 }
 
 struct score
@@ -492,6 +332,7 @@ bool ask_question()
 }
 
 int main( int argc, char** args )
+//int WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpszCmdLine, int nCmdShow ) 
 {
   cout << "Desktop Snake Game" << endl
        << "Move with arrows" << endl
@@ -531,17 +372,16 @@ int main( int argc, char** args )
   srand( time(0) ); //init randomizer
   desktop_path = get_desktop_path() + "/";
   win_handle = get_desktop_listview_handle();
-  has_snaptogrid = get_snap_to_grid();
-  get_original_icon_locations( icon_pos );
-  get_icon_extents( icon_extents );
+  has_snaptogrid = get_snap_to_grid( win_handle );
+  get_original_icon_locations( win_handle, icon_pos );
+  get_icon_extents( win_handle, icon_extents );
   get_screen_size( screen_size );
-  set_snap_to_grid( false );
+  set_snap_to_grid( win_handle, false );
   register_hotkeys();
 
   //--------
   //GAMEPLAY
   //--------
-  bool run = true;
   timer clock;
 
   //get map size
@@ -578,7 +418,7 @@ int main( int argc, char** args )
 
   //reacquire icon locations
   icon_pos.clear();
-  get_original_icon_locations( icon_pos );
+  get_original_icon_locations( win_handle, icon_pos );
 
   food_idx = icon_pos.size() - 1;
 
@@ -619,6 +459,9 @@ int main( int argc, char** args )
         else if( msg.wParam == ESCAPE )
           run = false;
       }
+
+      TranslateMessage( &msg );
+    	DispatchMessage( &msg );
     }
 
     if( clock.get_elapsed_time() > 1000 / gamespeed )
@@ -673,13 +516,13 @@ int main( int argc, char** args )
   Sleep(3000);
 
   //reset icons at exit
-  set_snap_to_grid( has_snaptogrid );
+  set_snap_to_grid( win_handle, has_snaptogrid );
 
   unregister_hotkeys();
 
   int cnt = 0;
   for( auto c : icon_pos )
-    set_icon_position( cnt++, c );
+    set_icon_position( win_handle, cnt++, c );
 
   set_windows_visibility( true );
 
